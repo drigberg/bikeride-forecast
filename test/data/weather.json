@@ -650,8 +650,8 @@
       "dt": 1550448000,
       "main": {
         "temp": 10.49,
-        "temp_min": 10.49,
-        "temp_max": 10.49,
+        "temp_min": 1.49,
+        "temp_max": 1.49,
         "pressure": 1028.75,
         "sea_level": 1038.51,
         "grnd_level": 1028.75,

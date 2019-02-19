@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import json
 import logging
 import math
 import typing
@@ -7,12 +8,16 @@ from tornado import httpclient
 from mapbox import Directions
 
 logger = logging.getLogger(__name__)
-WEATHER_API_KEY = "fea7bb4e6919137c5b36a7b0e30e306e"
-MAPS_API_KEY = "pk.eyJ1IjoiZHJpZ2JlcmciLCJhIjoiY2pzNjRrdDJpMGtwajQzcGY5NDlsOGZrbCJ9.Qpc9NNS0Kk20_4WKJmUnhQ"
 
+
+def get_secrets():
+    with open('secrets.json', 'rb') as f:
+        secrets = json.loads(f.read())
+    return secrets
 
 def get_directions(pointA: tuple, pointB: tuple):
-    service = Directions(access_token=MAPS_API_KEY)
+    secrets = get_secrets()
+    service = Directions(access_token=secrets['mapbox_api_key'])
     origin = {
         'type': 'Feature',
         'properties': {'name': 'Portland, OR'},
@@ -54,10 +59,13 @@ def calc_degrees_north_from_coords(pointA: tuple, pointB: tuple) -> float:
         deg = 270 + deg
     return round(deg, 2)
 
-def get_weather_data() -> typing.Mapping:
+def get_weather_data(coords: tuple) -> typing.Mapping:
+    secrets = get_secrets()
+    weather_api_key = secrets['weather_api_key']
+    base_url = "http://api.openweathermap.org/data/2.5/forecast"
     api_client = tornado.httpclient.HTTPClient()
     request = httpclient.HTTPRequest(
-        url=f"http://api.openweathermap.org/data/2.5/forecast?lat=35&lon=139&APPID={WEATHER_API_KEY}&units=metric",
+        url=f"{base_url}?lat={coords[0]}&lon={coords[1]}&APPID={weather_api_key}&units=metric",
         headers={
             "Accept": "application/json"
         },
@@ -87,7 +95,7 @@ class Weather:
     wind: Wind
 
     @classmethod
-    def get_weather_at_time(cls, time: datetime.datetime, weather_data: dict):
+    def get_weather_at_time(cls, weather_data: dict, time: datetime.datetime):
         dt = time.timestamp()
         closest_item = None
         for item in weather_data["list"]:
@@ -126,15 +134,35 @@ class SuckIndex:
 
     @classmethod
     def get_index(cls, weather: Weather, travel_direction: float):
-        score = 0
+        scores = [
+            cls.get_temp_score(weather.temp, weather.humidity),
+            cls.get_wind_score(weather.wind, travel_direction),
+            cls.get_rain_score(weather.rain),
+            cls.get_clouds_score(weather.clouds),
+        ]
+        return sum(scores)
 
-        score += cls.get_temp_score(weather.temp, weather.humidity)
-        score += cls.get_wind_score(weather.wind, travel_direction)
-        score += cls.get_rain_score(weather.rain)
-        score += cls.get_clouds_score(weather.clouds)
+    @classmethod
+    def get_index_for_trip(
+            cls,
+            weather_data: Weather,
+            day: datetime.datetime,
+            time: int,
+            pointA: tuple,
+            pointB: tuple):
+        direction = calc_degrees_north_from_coords(pointA, pointB)
 
-        return score
+        hour = int(time / 100)
+        minute = int(time - hour * 100)
 
+        weather = Weather.get_weather_at_time(weather_data, datetime.datetime(
+            year=day.year,
+            month=day.month,
+            day=day.day,
+            hour=hour,
+            minute=minute,
+            second=0))
+        return cls.get_index(weather, direction)
     @classmethod
     def get_rain_score(cls, rain: float):
         return rain * 5
@@ -167,12 +195,11 @@ class SuckIndex:
         indexes = []
         for t in [temp.min, temp.max]:
             index = 0
-            if t not in cls.IDEAL_TEMPERATURE_RANGE:
-                if t < cls.IDEAL_TEMPERATURE_RANGE.start:
-                    index = cls.IDEAL_TEMPERATURE_RANGE.start - t
-                else:
-                    humidity_multiplier = cls.get_humidity_multiplier(humidity)
-                    index = (t - cls.IDEAL_TEMPERATURE_RANGE.stop) * humidity_multiplier
+            if t < cls.IDEAL_TEMPERATURE_RANGE.start:
+                index = cls.IDEAL_TEMPERATURE_RANGE.start - t
+            elif t > cls.IDEAL_TEMPERATURE_RANGE.stop:
+                humidity_multiplier = cls.get_humidity_multiplier(humidity)
+                index = (t - cls.IDEAL_TEMPERATURE_RANGE.stop) * humidity_multiplier
             indexes.append(index)
         average = (indexes[0] + indexes[1]) / 2
 
@@ -192,4 +219,5 @@ class SuckIndex:
         static_score = base_score * 0.3
         score = modifiable_score * multiplier + static_score
         return round(score, 2)
+
 

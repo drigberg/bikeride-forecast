@@ -1,7 +1,3 @@
-import json
-import pathlib
-import pytest
-from datetime import datetime
 from lib import calc_degrees_north_from_coords, calc_difference_between_vectors
 
 class TestMath:

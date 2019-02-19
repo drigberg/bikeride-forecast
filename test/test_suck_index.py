@@ -1,5 +1,4 @@
 import json
-import pathlib
 import pytest
 from datetime import datetime
 from lib import SuckIndex, Temp, Weather, Wind
@@ -7,6 +6,12 @@ from lib import SuckIndex, Temp, Weather, Wind
 
 def is_approximately(score, target, delta=2):
     return abs(score - target) <= delta
+
+@pytest.fixture
+def weather_data():
+    with open('test/data/weather.json', 'rb') as f:
+        data = json.loads(f.read())
+    return data
 
 class TestSuckIndexUnit:
     def test_get_clouds_score(cls):
@@ -31,7 +36,10 @@ class TestSuckIndexUnit:
         assert SuckIndex.get_rain_score(1.4) == 7
 
     def test_get_temp_score_in_ideal_range(cls):
-        assert SuckIndex.get_temp_score(Temp(min=17, max=17), 0) == 0
+        assert SuckIndex.get_temp_score(Temp(min=13, max=13), 0) == 0
+        assert SuckIndex.get_temp_score(Temp(min=20.5, max=21), 0) == 0
+        assert SuckIndex.get_temp_score(Temp(min=20, max=21.5), 0) == 0
+        assert SuckIndex.get_temp_score(Temp(min=13.3, max=23.5), 0) == 0
         assert SuckIndex.get_temp_score(Temp(min=17, max=24), 0) == 0
         assert SuckIndex.get_temp_score(Temp(min=19, max=22), 0) == 0
         assert SuckIndex.get_temp_score(Temp(min=24, max=24), 0) == 0
@@ -45,6 +53,7 @@ class TestSuckIndexUnit:
         assert SuckIndex.get_temp_score(Temp(min=-3, max=2), 100) == 5.4
 
     def test_get_temp_score_above_ideal_range(cls):
+        assert SuckIndex.get_temp_score(Temp(min=27.5, max=27.5), 0) == 1
         assert SuckIndex.get_temp_score(Temp(min=30, max=30), 0) == 2
         assert SuckIndex.get_temp_score(Temp(min=35, max=35), 0) == 4
         assert SuckIndex.get_temp_score(Temp(min=35, max=45), 0) == 6
@@ -131,3 +140,51 @@ class TestSuckIndexIntegration:
             wind=Wind(speed=0, deg=90))
         score = SuckIndex.get_index(weather, 90)
         assert is_approximately(score, 12)
+
+    def test_suck_index_perfect(cls):
+        weather = Weather(
+            clouds=0,
+            dt=0,
+            humidity=0,
+            rain=0,
+            temp=Temp(min=18, max=22),
+            wind=Wind(speed=0, deg=90))
+        score = SuckIndex.get_index(weather, 90)
+        assert is_approximately(score, 0, delta=0.5)
+
+    def test_suck_index_incredible(cls):
+        weather = Weather(
+            clouds=0,
+            dt=0,
+            humidity=0,
+            rain=0,
+            temp=Temp(min=18, max=22),
+            wind=Wind(speed=10, deg=90))
+        score = SuckIndex.get_index(weather, 90)
+        assert is_approximately(score, -1, delta=1)
+
+    def test_get_index_for_trip(cls, weather_data):
+        assert is_approximately(
+                score=SuckIndex.get_index_for_trip(
+                    weather_data=weather_data,
+                    day=datetime.fromtimestamp(1550307600),
+                    time=900,
+                    pointA=(90, 90),
+                    pointB=(91, 90)),
+                target=2)
+        assert is_approximately(
+                score=SuckIndex.get_index_for_trip(
+                    weather_data=weather_data,
+                    day=datetime.fromtimestamp(1550448000),
+                    time=0000,
+                    pointA=(90, 90),
+                    pointB=(91, 90)),
+                target=5)
+        assert is_approximately(
+                score=SuckIndex.get_index_for_trip(
+                    weather_data=weather_data,
+                    day=datetime.fromtimestamp(1550588400),
+                    time=1500,
+                    pointA=(90, 90),
+                    pointB=(91, 90)),
+                target=36)  # TODO: reevaluate rain scaling
