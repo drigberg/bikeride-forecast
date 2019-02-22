@@ -3,17 +3,54 @@ import datetime
 import json
 import logging
 import math
+import pathlib
 import typing
-from tornado import httpclient
 from mapbox import Directions
+from tornado import httpclient
 
 logger = logging.getLogger(__name__)
 
+IDEAL_TEMPERATURE_RANGE = range(13, 25)
+
+@dataclasses.dataclass(frozen=True)
+class Subscription:
+    name: str
+    email: str
+    home: typing.Sequence[float]
+    dest: typing.Sequence[float]
+    departure_time: int
+    return_time: int
+
+    @classmethod
+    def from_data(cls, data):
+        assert isinstance(data['name'], str)
+        assert isinstance(data['email'], str)
+        assert isinstance(data['departure_time'], int)
+        assert isinstance(data['return_time'], int)
+        assert len(data['home']) == 2, 'Invalid home coords'
+        assert len(data['dest']) == 2, 'Invalid dest coords'
+
+        return cls(
+            name=data['name'],
+            email=data['email'],
+            home=data['home'],
+            dest=data['dest'],
+            departure_time=data['departure_time'],
+            return_time=data['return_time'])
+
+    def to_serializable(self):
+        return {
+            "name": self.name,
+            "email": self.email,
+            "home": self.home,
+            "dest": self.dest,
+            "departure_time": self.departure_time,
+            "return_time": self.return_time,
+        }
 
 def get_secrets():
-    with open('secrets.json', 'rb') as f:
-        secrets = json.loads(f.read())
-    return secrets
+    secrets_file = pathlib.Path('lib/secrets.json')
+    return json.loads(secrets_file.read_text())
 
 def get_directions(pointA: tuple, pointB: tuple):
     secrets = get_secrets()
@@ -53,17 +90,20 @@ def calc_degrees_north_from_coords(pointA: tuple, pointB: tuple) -> float:
 
     # Q1, Q2
     if width >= 0:
-        deg = 90 - deg
+        deg = 270 - deg
     # Q3
     else:
-        deg = 270 + deg
+        deg = 90 + deg
+    if deg == 360:
+        deg = 0
     return round(deg, 2)
 
-def get_weather_data(coords: tuple) -> typing.Mapping:
+async def get_weather_data(coords: tuple) -> typing.Mapping:
+    logger.debug('Getting weather data for %s', coords)
     secrets = get_secrets()
     weather_api_key = secrets['weather_api_key']
     base_url = "http://api.openweathermap.org/data/2.5/forecast"
-    api_client = tornado.httpclient.HTTPClient()
+    api_client = httpclient.AsyncHTTPClient()
     request = httpclient.HTTPRequest(
         url=f"{base_url}?lat={coords[0]}&lon={coords[1]}&APPID={weather_api_key}&units=metric",
         headers={
@@ -72,25 +112,31 @@ def get_weather_data(coords: tuple) -> typing.Mapping:
         connect_timeout=60,
         request_timeout=60
     )
-    response = api_client.fetch(request)
-    return response.body
+    try:
+        response = await api_client.fetch(request)
+        weather_data = json.loads(response.body.decode('utf-8'))
+    except Exception as esc:
+        logger.error(esc.response.body)
+        raise esc
+    logger.debug('Got weather data: %s', weather_data)
+    return weather_data
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Wind:
-    speed: float
-    deg: float
+    speed: float  # km/hour
+    deg: float  # meteorological degrees north (0 == wind from north to south)
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Temp:
-    min: float
-    max: float
+    min: float  # Celcius
+    max: float  # Celcius
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Weather:
-    clouds: int
-    dt: int
-    humidity: float
-    rain: float
+    clouds: int  # %
+    dt: int  # timestamp
+    humidity: float  # %
+    rain: float  # mm / 3h
     temp: Temp
     wind: Wind
 
@@ -109,7 +155,7 @@ class Weather:
 
     @classmethod
     def create_from_weather_data(cls, data: dict):
-        if data['wind']:
+        if 'wind' in data:
             wind = Wind(
                 speed=data['wind']['speed'],
                 deg=data['wind']['deg'])
@@ -117,11 +163,22 @@ class Weather:
             wind = Wind(
                 speed=0,
                 deg=0)
+
+        if 'rain' in data and '3h' in data['rain']:
+            rain = data['rain']['3h']
+        else:
+            rain = 0
+
+        if 'clouds' in data and 'all' in data['clouds']:
+            clouds = data['clouds']['all']
+        else:
+            clouds = 0
+
         return cls(
-            clouds=data['clouds']['all'] if data['clouds'] else 0,
+            clouds=clouds,
             dt=data['dt'],
             humidity=data['main']['humidity'],
-            rain=data['rain']['3h'] if data['rain'] else 0,
+            rain=rain,
             temp=Temp(
                 min=data['main']['temp_min'],
                 max=data['main']['temp_max']
@@ -129,21 +186,32 @@ class Weather:
             wind=wind
         )
 
-class SuckIndex:
-    IDEAL_TEMPERATURE_RANGE = range(13, 25)
+
+@dataclasses.dataclass(frozen=True)
+class SuckReport:
+    temp: float
+    wind: float
+    rain: float
+    clouds: float
+    weather: Weather
+    travel_direction: float
+
+    @property
+    def total(self) -> float:
+      return self.temp + self.wind + self.rain + self.clouds
 
     @classmethod
-    def get_index(cls, weather: Weather, travel_direction: float):
-        scores = [
-            cls.get_temp_score(weather.temp, weather.humidity),
-            cls.get_wind_score(weather.wind, travel_direction),
-            cls.get_rain_score(weather.rain),
-            cls.get_clouds_score(weather.clouds),
-        ]
-        return sum(scores)
+    def create(cls, weather: Weather, travel_direction: float):
+        return cls(
+            temp=cls.get_temp_score(weather.temp, weather.humidity),
+            wind=cls.get_wind_score(weather.wind, travel_direction),
+            rain=cls.get_rain_score(weather.rain),
+            clouds=cls.get_clouds_score(weather.clouds),
+            weather=weather,
+            travel_direction=travel_direction)
 
     @classmethod
-    def get_index_for_trip(
+    def create_for_trip(
             cls,
             weather_data: Weather,
             day: datetime.datetime,
@@ -151,22 +219,26 @@ class SuckIndex:
             pointA: tuple,
             pointB: tuple):
         direction = calc_degrees_north_from_coords(pointA, pointB)
-
         hour = int(time / 100)
         minute = int(time - hour * 100)
-
-        weather = Weather.get_weather_at_time(weather_data, datetime.datetime(
+        date = datetime.datetime(
             year=day.year,
             month=day.month,
             day=day.day,
             hour=hour,
             minute=minute,
-            second=0))
-        return cls.get_index(weather, direction)
+            second=0)
+        weather = Weather.get_weather_at_time(weather_data, date)
+        return cls.create(weather, direction)
+
     @classmethod
     def get_rain_score(cls, rain: float):
-        return rain * 5
-
+        """any rain sucks."""
+        if rain == 0:
+            score = 0
+        else:
+            score = 5 + rain
+        return round(score, 2)
     @classmethod
     def get_wind_direction_multiplier(cls, travel_deg: float, wind_deg: float):
         """
@@ -180,7 +252,8 @@ class SuckIndex:
     @classmethod
     def get_clouds_score(cls, clouds: int):
         """ maximum 5 points """
-        return clouds / 100 * 5
+        score = clouds / 100 * 5
+        return round(score, 2)
 
     @classmethod
     def get_humidity_multiplier(cls, humidity: int):
@@ -192,18 +265,18 @@ class SuckIndex:
         Suckiness is based on distance from ideal range.
         Final value is average of min and max scores.
         """
-        indexes = []
+        scores = []
         for t in [temp.min, temp.max]:
-            index = 0
-            if t < cls.IDEAL_TEMPERATURE_RANGE.start:
-                index = cls.IDEAL_TEMPERATURE_RANGE.start - t
-            elif t > cls.IDEAL_TEMPERATURE_RANGE.stop:
+            score = 0
+            if t < IDEAL_TEMPERATURE_RANGE.start:
+                score = IDEAL_TEMPERATURE_RANGE.start - t
+            elif t > IDEAL_TEMPERATURE_RANGE.stop:
                 humidity_multiplier = cls.get_humidity_multiplier(humidity)
-                index = (t - cls.IDEAL_TEMPERATURE_RANGE.stop) * humidity_multiplier
-            indexes.append(index)
-        average = (indexes[0] + indexes[1]) / 2
-
-        return average / 2.5
+                score = (t - IDEAL_TEMPERATURE_RANGE.stop) * humidity_multiplier
+            scores.append(score)
+        average = (scores[0] + scores[1]) / 2
+        total = average / 2.5
+        return round(total, 2)
 
     @classmethod
     def get_wind_score(cls, wind: Wind, travel_direction: float):
@@ -220,4 +293,95 @@ class SuckIndex:
         score = modifiable_score * multiplier + static_score
         return round(score, 2)
 
+def create_email_contents(sub: Subscription, departure_report: SuckReport, return_report: SuckReport) -> (str, str):
+    text = f"Hey {sub.name}!" \
+           f"\tTotal suckiness for departure at {sub.departure_time}: {departure_report.total}" \
+           f"\t\tWind: {departure_report.wind}" \
+           f"\t\tTemp: {departure_report.temp}" \
+           f"\t\tRain: {departure_report.rain}" \
+           f"\t\tClouds: {departure_report.clouds}" \
+           f"\tTotal suckiness for return at {sub.return_time}: {return_report.total}" \
+           f"\t\tWind: {return_report.wind}" \
+           f"\t\tTemp: {return_report.temp}" \
+           f"\t\tRain: {return_report.rain}" \
+           f"\t\tClouds: {return_report.clouds}" \
+           f"\nReminder: < 5 is great; 5-10 is fine; 11-15 sucks; 16-20 is horrendous; 21+ is a legendary failure."
 
+    html = """\
+    <html>
+    <head></head>
+    <body>
+        <h1>Hey {sub.name}!</h2>
+        <h3>Departure at {sub.departure_time}, traveling at {departure_report.travel_direction} degrees north</h3>
+        <h4>Total suckiness: {departure_report.total} points</h4>
+        <ul>
+            <li>
+                Wind: {departure_report.wind} points
+                <ul>
+                    <li>Speed: {departure_report.weather.wind.speed} km/hour</li>
+                    <li>Direction: {departure_report.weather.wind.deg} degrees north</li>
+                </ul>
+            </li>
+            <li>
+                Temp: {departure_report.temp} points
+                <ul>
+                    <li>Min: {departure_report.weather.temp.min} degrees Celcius</li>
+                    <li>Max: {departure_report.weather.temp.max} degrees Celcius</li>
+                    <li>Humidity: {departure_report.weather.humidity}%</li>
+                </ul>
+            </li>
+            <li>
+                Rain: {departure_report.rain} points
+                <ul>
+                    <li>{departure_report.weather.rain} mm/3h</li>
+                </ul>
+            </li>
+            <li>
+                Clouds: {departure_report.clouds} points
+                <ul>
+                    <li>{departure_report.weather.clouds}%</li>
+                </ul>
+            </li>
+        </ul>
+        <h3>Return at {sub.return_time}, traveling at {return_report.travel_direction} degrees north</h3>
+        <h4>Total suckiness: {return_report.total} points</h4>
+        <ul>
+            <li>
+                Wind: {return_report.wind} points
+                <ul>
+                    <li>Speed: {return_report.weather.wind.speed} km/hour</li>
+                    <li>Direction: {return_report.weather.wind.deg} degrees north</li>
+                </ul>
+            </li>
+            <li>
+                Temp: {return_report.temp} points
+                <ul>
+                    <li>Min: {return_report.weather.temp.min} degrees Celcius</li>
+                    <li>Max: {return_report.weather.temp.max} degrees Celcius</li>
+                    <li>Humidity: {return_report.weather.humidity}%</li>
+                </ul>
+            </li>
+            <li>
+                Rain: {return_report.rain} points
+                <ul>
+                    <li>{return_report.weather.rain} mm/3h</li>
+                </ul>
+            </li>
+            <li>
+                Clouds: {return_report.clouds} points
+                <ul>
+                    <li>{return_report.weather.clouds}%</li>
+                </ul>
+            </li>
+        </ul>
+        <br>
+        <em>Reminder for point totals: < 5 is great; 5-10 is fine; 11-15 sucks; 16-20 is horrendous; 21+ is a legendary failure.</em>
+    </body>
+    </html>
+    """.format(
+        sub=sub,
+        departure_report=departure_report,
+        return_report=return_report
+    )
+
+    return (text, html)

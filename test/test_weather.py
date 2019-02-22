@@ -11,7 +11,7 @@ def weather_data():
 
 class TestWeather:
     def test_get_weather_at_time_exact(cls, weather_data):
-        time = datetime(2019, 2, 16, 7, 0)
+        time = datetime.fromtimestamp(1550296800)
         weather = Weather.get_weather_at_time(weather_data, time)
         assert weather.dt == 1550296800
 

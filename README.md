@@ -1,14 +1,14 @@
-# THE SUCK INDEX: HOW MUCH WILL YOUR BIKE RIDE SUCK TODAY?
+# BIKERIDE WEATHER FORECAST: HOW MUCH WILL YOUR BIKE RIDE SUCK TODAY?
 
 ## Calculations
-The Suck Index is based on the very subjective assumption that each increment of the following is roughly equivalent in terms of suckiness:
+The Suck Report is based on the very subjective assumption that each increment of the following is roughly equivalent in terms of suckiness:
     - 2.5 degrees Celcius below ideal range
     - 2.5 degrees Celcius above ideal range, with 0% humidity
     - 1.25 degrees Celcius above ideal range, with 100% humidity
     - 20% cloud cover
     - 12km/hour crosswind
     - 5km/hour headwind
-    - 20mm of rain
+    - 1mm of rain over 3 hours
 
 ## But what does my score mean?
 The following scale interprets the composite score:

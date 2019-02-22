@@ -2,19 +2,19 @@ from lib import calc_degrees_north_from_coords, calc_difference_between_vectors
 
 class TestMath:
     def test_calc_degrees_north_from_coords(cls):
-        assert calc_degrees_north_from_coords((0, 0), (0, 1)) == 0
-        assert calc_degrees_north_from_coords((10, 10), (13, 15.196)) == 30
-        assert calc_degrees_north_from_coords((10, 10), (15, 15)) == 45
-        assert calc_degrees_north_from_coords((0, 0), (1, 0)) == 90
-        assert calc_degrees_north_from_coords((0, 0), (5.196, -3)) == 120
-        assert calc_degrees_north_from_coords((0, 0), (5, -5)) == 135
-        assert calc_degrees_north_from_coords((0, 0), (3, -5.196)) == 150
-        assert calc_degrees_north_from_coords((0, 0), (0, -1)) == 180
-        assert calc_degrees_north_from_coords((0, 0), (-3, -5.196)) == 210
-        assert calc_degrees_north_from_coords((1, 1), (-1, -1)) == 225
-        assert calc_degrees_north_from_coords((0, 0), (-5.196, -3)) == 240
-        assert calc_degrees_north_from_coords((0, 0), (-1, 0)) == 270
-        assert calc_degrees_north_from_coords((0, 0), (-5, 5)) == 315
+        assert calc_degrees_north_from_coords((0, 0), (0, 1)) == 180
+        assert calc_degrees_north_from_coords((10, 10), (13, 15.196)) == 210
+        assert calc_degrees_north_from_coords((10, 10), (15, 15)) == 225
+        assert calc_degrees_north_from_coords((0, 0), (1, 0)) == 270
+        assert calc_degrees_north_from_coords((0, 0), (5.196, -3)) == 300
+        assert calc_degrees_north_from_coords((0, 0), (5, -5)) == 315
+        assert calc_degrees_north_from_coords((0, 0), (3, -5.196)) == 330
+        assert calc_degrees_north_from_coords((0, 0), (0, -1)) == 0
+        assert calc_degrees_north_from_coords((0, 0), (-3, -5.196)) == 30
+        assert calc_degrees_north_from_coords((1, 1), (-1, -1)) == 45
+        assert calc_degrees_north_from_coords((0, 0), (-5.196, -3)) == 60
+        assert calc_degrees_north_from_coords((0, 0), (-1, 0)) == 90
+        assert calc_degrees_north_from_coords((0, 0), (-5, 5)) == 135
 
     def test_calc_difference_between_vectors(cls):
         assert calc_difference_between_vectors(90, 90) == 0

@@ -7,8 +7,8 @@
       "dt": 1550242800,
       "main": {
         "temp": 12.22,
-        "temp_min": 11.93,
-        "temp_max": 12.22,
+        "temp_min": 0.93,
+        "temp_max": 2.22,
         "pressure": 1019.95,
         "sea_level": 1029.56,
         "grnd_level": 1019.95,
@@ -27,7 +27,7 @@
         "all": 12
       },
       "wind": {
-        "speed": 10.61,
+        "speed": 20.61,
         "deg": 251.001
       },
       "rain": {},
@@ -1084,7 +1084,7 @@
     {
       "dt": 1550588400,
       "main": {
-        "temp": 16.85,
+        "temp": 12.85,
         "temp_min": 16.85,
         "temp_max": 16.85,
         "pressure": 1018.92,
