@@ -22,7 +22,7 @@ def send_email(
         return_report: SuckReport):
     logger.info('Sending email to %s!', sub.email)
     secrets = get_secrets()
-    text, html = create_email_contents(sub, departure_report, departure_time)
+    text, html = create_email_contents(sub, departure_report, return_report)
 
     from_address = secrets['email_user']
     msg = MIMEMultipart('alternative')

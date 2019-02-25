@@ -16,19 +16,19 @@ class TestEmail:
                 weather_data=weather_data,
                 day=datetime.fromtimestamp(1550264400),
                 time=900,
-                pointA=(90, 90),
-                pointB=(91, 89))
+                pointA=(52.344, 4.9504),
+                pointB=(2.3402, 4.8264))
         return_report = SuckReport.create_for_trip(
                 weather_data=weather_data,
                 day=datetime.fromtimestamp(1550264400),
                 time=1800,
-                pointA=(91, 89),
-                pointB=(90, 90))
+                pointA=(2.3402, 4.8264),
+                pointB=(52.344, 4.9504))
         sub = Subscription(
             name='dan',
             email='dan@dan.dan',
-            home=[90, 90],
-            dest=[91, 89],
+            home=[52.344, 4.9504],
+            dest=[2.3402, 4.8264],
             departure_time=900,
             return_time=1800
         )

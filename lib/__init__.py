@@ -83,8 +83,9 @@ def calc_difference_between_vectors(deg1: float, deg2: float):
     return diff
 
 def calc_degrees_north_from_coords(pointA: tuple, pointB: tuple) -> float:
-    height = pointB[1] - pointA[1]
-    width = pointB[0] - pointA[0]
+    """ delta_lat --> height, delta_lon --> width """
+    width = pointB[1] - pointA[1]
+    height = pointB[0] - pointA[0]
     hypotenuse = math.sqrt(math.pow(height, 2) + math.pow(width, 2))
     deg = math.degrees(math.asin(height/hypotenuse))
 
@@ -119,6 +120,7 @@ async def get_weather_data(coords: tuple) -> typing.Mapping:
         logger.error(esc.response.body)
         raise esc
     logger.debug('Got weather data: %s', weather_data)
+    import pdb; pdb.set_trace()
     return weather_data
 
 @dataclasses.dataclass(frozen=True)

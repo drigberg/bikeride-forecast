@@ -2,6 +2,7 @@
 
 ## Calculations
 The Suck Report is based on the very subjective assumption that each increment of the following is roughly equivalent in terms of suckiness:
+
     - 2.5 degrees Celcius below ideal range
     - 2.5 degrees Celcius above ideal range, with 0% humidity
     - 1.25 degrees Celcius above ideal range, with 100% humidity
