@@ -1,17 +1,19 @@
 import json
 import pytest
 from datetime import datetime
-from lib import SuckReport, Temp, Weather, Wind
+from get_and_send_forecasts import SuckReport, Temp, Weather, Wind
 
 
 def is_approximately(score, target, delta=2):
     return abs(score - target) <= delta
+
 
 @pytest.fixture
 def weather_data():
     with open('test/data/weather.json', 'rb') as f:
         data = json.loads(f.read())
     return data
+
 
 class TestSuckReportUnit:
     def test_get_clouds_score(cls):
@@ -76,6 +78,7 @@ class TestSuckReportIntegration:
             rain=1.4,
             temp=Temp(min=20, max=30),
             wind=Wind(speed=40, deg=90))
+
         def calc(travel_direction):
             return SuckReport.create(weather, travel_direction).total
 
@@ -164,16 +167,6 @@ class TestSuckReportIntegration:
         assert is_approximately(score, -1, delta=1)
 
     def test_create_for_trip(cls, weather_data):
-        # I don't remember what this one really is
-        assert is_approximately(
-            score=SuckReport.create_for_trip(
-                weather_data=weather_data,
-                day=datetime.fromtimestamp(1550307600),
-                time=900,
-                pointA=(90, 90),
-                pointB=(91, 90)).total,
-            target=9)
-
         # cold, but a tailwind
         assert is_approximately(
             score=SuckReport.create_for_trip(
@@ -192,4 +185,4 @@ class TestSuckReportIntegration:
                 time=1000,
                 pointA=(90, 90),
                 pointB=(91, 90)).total,
-            target=18)
+            target=7)

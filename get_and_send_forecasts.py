@@ -1,79 +1,35 @@
+import boto3
 import dataclasses
 import datetime
 import json
 import logging
 import math
-import pathlib
+import smtplib
 import typing
-from mapbox import Directions
-from tornado import httpclient
+from botocore.vendored import requests
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 IDEAL_TEMPERATURE_RANGE = range(13, 25)
 
-@dataclasses.dataclass(frozen=True)
-class Subscription:
-    name: str
-    email: str
-    home: typing.Sequence[float]
-    dest: typing.Sequence[float]
-    departure_time: int
-    return_time: int
 
-    @classmethod
-    def from_data(cls, data):
-        assert isinstance(data['name'], str)
-        assert isinstance(data['email'], str)
-        assert isinstance(data['departure_time'], int)
-        assert isinstance(data['return_time'], int)
-        assert len(data['home']) == 2, 'Invalid home coords'
-        assert len(data['dest']) == 2, 'Invalid dest coords'
+def get_store():
+    s3 = boto3.client("s3")
+    res = s3.get_object(Bucket='bikeride-forecast', Key='store.json')
+    store = json.loads(res["Body"].read())
+    logger.info("Got store: %s", store)
+    return store
 
-        return cls(
-            name=data['name'],
-            email=data['email'],
-            home=data['home'],
-            dest=data['dest'],
-            departure_time=data['departure_time'],
-            return_time=data['return_time'])
-
-    def to_serializable(self):
-        return {
-            "name": self.name,
-            "email": self.email,
-            "home": self.home,
-            "dest": self.dest,
-            "departure_time": self.departure_time,
-            "return_time": self.return_time,
-        }
 
 def get_secrets():
-    secrets_file = pathlib.Path('lib/secrets.json')
-    return json.loads(secrets_file.read_text())
-
-def get_directions(pointA: tuple, pointB: tuple):
-    secrets = get_secrets()
-    service = Directions(access_token=secrets['mapbox_api_key'])
-    origin = {
-        'type': 'Feature',
-        'properties': {'name': 'Portland, OR'},
-        'geometry': {
-            'type': 'Point',
-            'coordinates': list(pointA)
-        }
-    }
-    destination = {
-        'type': 'Feature',
-        'properties': {'name': 'Bend, OR'},
-        'geometry': {
-            'type': 'Point',
-            'coordinates': list(pointB)
-        }
-    }
-    response = service.directions([origin, destination])
-    assert response.status_code == 200
-    return response.geojson()
+    s3 = boto3.client("s3")
+    res = s3.get_object(Bucket='bikeride-forecast', Key='secrets.json')
+    secrets = json.loads(res["Body"].read())
+    logger.info("Got secrets!")
+    return secrets
 
 
 def calc_difference_between_vectors(deg1: float, deg2: float):
@@ -82,8 +38,20 @@ def calc_difference_between_vectors(deg1: float, deg2: float):
         diff = 360 - diff
     return diff
 
+
 def calc_degrees_north_from_coords(pointA: tuple, pointB: tuple) -> float:
-    """ delta_lat --> height, delta_lon --> width """
+    """
+    delta_lat --> height, delta_lon --> width
+
+    Example:
+        home == 52.000, 5.100
+        work == 52.000, 5.000
+
+        deltaY == 0
+        delta X == -0.1
+        Direction == from east => 90 degrees north
+    """
+
     width = pointB[1] - pointA[1]
     height = pointB[0] - pointA[0]
     hypotenuse = math.sqrt(math.pow(height, 2) + math.pow(width, 2))
@@ -99,39 +67,42 @@ def calc_degrees_north_from_coords(pointA: tuple, pointB: tuple) -> float:
         deg = 0
     return round(deg, 2)
 
-async def get_weather_data(coords: tuple) -> typing.Mapping:
+
+def get_weather_data(coords: tuple) -> typing.Mapping:
     logger.debug('Getting weather data for %s', coords)
     secrets = get_secrets()
     weather_api_key = secrets['weather_api_key']
     base_url = "http://api.openweathermap.org/data/2.5/forecast"
-    api_client = httpclient.AsyncHTTPClient()
-    request = httpclient.HTTPRequest(
-        url=f"{base_url}?lat={coords[0]}&lon={coords[1]}&APPID={weather_api_key}&units=metric",
-        headers={
-            "Accept": "application/json"
-        },
-        connect_timeout=60,
-        request_timeout=60
-    )
+
+    url = f"{base_url}?lat={coords[0]}&lon={coords[1]}&APPID={weather_api_key}&units=metric"
+    headers = {
+        "Accept": "application/json"
+    }
+
+    weather_data = None
     try:
-        response = await api_client.fetch(request)
-        weather_data = json.loads(response.body.decode('utf-8'))
+        res = requests.get(url, headers=headers)
+        logger.info("Got response from weather api")
+        weather_data = json.loads(res.text)
+        logger.info("parsed response body!", weather_data)
     except Exception as esc:
-        logger.error(esc.response.body)
+        logger.error("ERROR", esc)
         raise esc
     logger.debug('Got weather data: %s', weather_data)
-    import pdb; pdb.set_trace()
     return weather_data
+
 
 @dataclasses.dataclass(frozen=True)
 class Wind:
     speed: float  # km/hour
     deg: float  # meteorological degrees north (0 == wind from north to south)
 
+
 @dataclasses.dataclass(frozen=True)
 class Temp:
     min: float  # Celcius
     max: float  # Celcius
+
 
 @dataclasses.dataclass(frozen=True)
 class Weather:
@@ -190,6 +161,43 @@ class Weather:
 
 
 @dataclasses.dataclass(frozen=True)
+class Subscription:
+    name: str
+    email: str
+    home: typing.Sequence[float]
+    dest: typing.Sequence[float]
+    departure_time: int
+    return_time: int
+
+    @classmethod
+    def from_data(cls, data):
+        assert isinstance(data['name'], str)
+        assert isinstance(data['email'], str)
+        assert isinstance(data['departure_time'], int)
+        assert isinstance(data['return_time'], int)
+        assert len(data['home']) == 2, 'Invalid home coords'
+        assert len(data['dest']) == 2, 'Invalid dest coords'
+
+        return cls(
+            name=data['name'],
+            email=data['email'],
+            home=data['home'],
+            dest=data['dest'],
+            departure_time=data['departure_time'],
+            return_time=data['return_time'])
+
+    def to_serializable(self):
+        return {
+            "name": self.name,
+            "email": self.email,
+            "home": self.home,
+            "dest": self.dest,
+            "departure_time": self.departure_time,
+            "return_time": self.return_time,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class SuckReport:
     temp: float
     wind: float
@@ -200,7 +208,7 @@ class SuckReport:
 
     @property
     def total(self) -> float:
-      return self.temp + self.wind + self.rain + self.clouds
+        return self.temp + self.wind + self.rain + self.clouds
 
     @classmethod
     def create(cls, weather: Weather, travel_direction: float):
@@ -208,7 +216,8 @@ class SuckReport:
             temp=cls.get_temp_score(weather.temp, weather.humidity),
             wind=cls.get_wind_score(weather.wind, travel_direction),
             rain=cls.get_rain_score(weather.rain),
-            clouds=cls.get_clouds_score(weather.clouds),
+            clouds=0,  # clouds is currently removed
+            # clouds=cls.get_clouds_score(weather.clouds),
             weather=weather,
             travel_direction=travel_direction)
 
@@ -241,6 +250,7 @@ class SuckReport:
         else:
             score = 5 + rain
         return round(score, 2)
+
     @classmethod
     def get_wind_direction_multiplier(cls, travel_deg: float, wind_deg: float):
         """
@@ -295,6 +305,7 @@ class SuckReport:
         score = modifiable_score * multiplier + static_score
         return round(score, 2)
 
+
 def create_email_contents(sub: Subscription, departure_report: SuckReport, return_report: SuckReport) -> (str, str):
     text = f"Hey {sub.name}!" \
            f"\tTotal suckiness for departure at {sub.departure_time}: {departure_report.total}" \
@@ -313,7 +324,7 @@ def create_email_contents(sub: Subscription, departure_report: SuckReport, retur
     <html>
     <head></head>
     <body>
-        <h1>Hey {sub.name}!</h2>
+        <h1>Hey {sub.name}!</h1>
         <h3>Departure at {sub.departure_time}, traveling at {departure_report.travel_direction} degrees north</h3>
         <h4>Total suckiness: {departure_report.total} points</h4>
         <ul>
@@ -387,3 +398,61 @@ def create_email_contents(sub: Subscription, departure_report: SuckReport, retur
     )
 
     return (text, html)
+
+
+def send_email(
+        sub: Subscription,
+        departure_report: SuckReport,
+        return_report: SuckReport):
+    logger.info('Sending email to %s!', sub.email)
+    secrets = get_secrets()
+    text, html = create_email_contents(sub, departure_report, return_report)
+
+    from_address = secrets['email_user']
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = "BikeRideForecast: Your Daily Report"
+    msg['From'] = from_address
+    msg['To'] = sub.email
+    msg.attach(MIMEText(text, 'plain'))
+    msg.attach(MIMEText(html, 'html'))
+
+    smtp = smtplib.SMTP('smtp.gmail.com', 587)
+    smtp.set_debuglevel(0)
+    smtp.ehlo()
+    smtp.starttls()
+    smtp.ehlo()
+    smtp.login(from_address, secrets["email_pass"])
+    smtp.sendmail(from_address, sub.email, msg.as_string())
+    smtp.quit()
+    logger.info('Sent email to %s!', sub.email)
+
+
+def send_notifications():
+    logger.info('Sending notifications!')
+    store = get_store()
+    for subscription_data in store:
+        sub = Subscription.from_data(subscription_data)
+        home = tuple(sub.home)
+        dest = tuple(sub.dest)
+        midway_point = (
+            round((home[0] + dest[0]) / 2, 6),
+            round((home[1] + dest[1]) / 2, 6)
+        )
+        weather_data = get_weather_data(midway_point)
+        departure_report = SuckReport.create_for_trip(
+            weather_data=weather_data,
+            day=datetime.datetime.today(),
+            time=sub.departure_time,
+            pointA=home,
+            pointB=dest)
+        return_report = SuckReport.create_for_trip(
+            weather_data=weather_data,
+            day=datetime.datetime.today(),
+            time=sub.return_time,
+            pointA=dest,
+            pointB=home)
+        send_email(sub, departure_report, return_report)
+
+
+def handler(event, context):
+    send_notifications()

@@ -1,13 +1,15 @@
 import json
 import pytest
 from datetime import datetime
-from lib import Weather
+from get_and_send_forecasts import Weather
+
 
 @pytest.fixture
 def weather_data():
     with open('test/data/weather.json', 'rb') as f:
         data = json.loads(f.read())
     return data
+
 
 class TestWeather:
     def test_get_weather_at_time_exact(cls, weather_data):
